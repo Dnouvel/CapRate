@@ -1,0 +1,239 @@
+import React, { useMemo, useState } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Slider } from "@/components/ui/slider";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Select, SelectTrigger, SelectItem, SelectContent, SelectValue } from "@/components/ui/select";
+import { Download, RefreshCw } from "lucide-react";
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+
+// Utility helpers
+const fmtCurrency = (n) => new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(n);
+const pct = (n) => (n * 100).toFixed(2) + "%";
+
+function range(start, end, step) {
+  const out = [];
+  for (let v = start; v <= end + 1e-12; v += step) out.push(+v.toFixed(6));
+  return out;
+}
+
+export default function CapRateInteractive() {
+  // Base inputs
+  const [baseNOI, setBaseNOI] = useState(20_000_000);
+  const [baseCap, setBaseCap] = useState(0.08);
+  // Axes
+  const [noiMin, setNoiMin] = useState(0.9);
+  const [noiMax, setNoiMax] = useState(1.1);
+  const [noiStep, setNoiStep] = useState(0.02);
+  const [capMin, setCapMin] = useState(0.07);
+  const [capMax, setCapMax] = useState(0.09);
+  const [capStep, setCapStep] = useState(0.0025);
+  // Display
+  const [precision, setPrecision] = useState("0");
+
+  const noiMultipliers = useMemo(() => range(noiMin, noiMax, noiStep), [noiMin, noiMax, noiStep]);
+  const capRates = useMemo(() => range(capMin, capMax, capStep), [capMin, capMax, capStep]);
+
+  const grid = useMemo(() => {
+    return noiMultipliers.map((m) =>
+      capRates.map((c) => (baseNOI * m) / c)
+    );
+  }, [noiMultipliers, capRates, baseNOI]);
+
+  const baseValue = useMemo(() => baseNOI / baseCap, [baseNOI, baseCap]);
+  const minus50bps = useMemo(() => baseNOI / (baseCap - 0.005), [baseNOI, baseCap]);
+  const plus50bps = useMemo(() => baseNOI / (baseCap + 0.005), [baseNOI, baseCap]);
+
+  const chartData = useMemo(() => capRates.map((c) => ({ cap: (c * 100).toFixed(2), value: Math.round(baseNOI / c) })), [capRates, baseNOI]);
+
+  const maxVal = useMemo(() => Math.max(...grid.flat()), [grid]);
+  const minVal = useMemo(() => Math.min(...grid.flat()), [grid]);
+
+  const colorFor = (v) => {
+    // Map value to lightness (low→lighter, high→darker)
+    const t = (v - minVal) / (maxVal - minVal + 1e-9);
+    const light = 95 - t * 55; // 95% → 40%
+    return `hsl(210 70% ${light}%)`;
+  };
+
+  const reset = () => {
+    setBaseNOI(20_000_000);
+    setBaseCap(0.08);
+    setNoiMin(0.9); setNoiMax(1.1); setNoiStep(0.02);
+    setCapMin(0.07); setCapMax(0.09); setCapStep(0.0025);
+    setPrecision("0");
+  };
+
+  const downloadCSV = () => {
+    const header = ["NOI x / Cap→", ...capRates.map((c) => (c * 100).toFixed(2) + "%")].join(",");
+    const rows = grid.map((row, i) => [pct(noiMultipliers[i]), ...row.map((v) => Math.round(v))].join(","));
+    const csv = [header, ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "caprate_sensitivity.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="w-full min-h-screen bg-white p-6 md:p-10">
+      <div className="max-w-7xl mx-auto space-y-6">
+        <div className="flex items-center justify-between gap-4">
+          <h1 className="text-2xl md:text-3xl font-semibold tracking-tight">Cap Rates in Action — Interactive Sensitivity Workshop</h1>
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={reset} className="gap-2"><RefreshCw className="w-4 h-4"/> Reset</Button>
+            <Button onClick={downloadCSV} className="gap-2"><Download className="w-4 h-4"/> CSV</Button>
+          </div>
+        </div>
+
+        {/* Top cards */}
+        <div className="grid md:grid-cols-3 gap-4">
+          <Card className="shadow">
+            <CardHeader>
+              <CardTitle>Base Inputs</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-3 items-center">
+                <Label>Base NOI (SAR/yr)</Label>
+                <Input type="number" value={baseNOI} onChange={(e) => setBaseNOI(+e.target.value)} />
+                <Label>Base Cap Rate</Label>
+                <div className="flex items-center gap-3">
+                  <Input type="number" step="0.0001" value={baseCap} onChange={(e) => setBaseCap(+e.target.value)} />
+                  <span className="text-sm text-muted-foreground">{pct(baseCap)}</span>
+                </div>
+                <Label>Value (NOI ÷ Cap)</Label>
+                <div className="text-xl font-semibold">{fmtCurrency(baseValue)}</div>
+              </div>
+              <div className="grid grid-cols-2 gap-3 items-center">
+                <Label>−50 bps Cap</Label>
+                <div className="font-medium">{fmtCurrency(minus50bps)}</div>
+                <Label>+50 bps Cap</Label>
+                <div className="font-medium">{fmtCurrency(plus50bps)}</div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="shadow">
+            <CardHeader>
+              <CardTitle>Axes — NOI Multipliers</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-3 items-center">
+                <Label>Min</Label>
+                <Input type="number" step="0.01" value={noiMin} onChange={(e) => setNoiMin(+e.target.value)} />
+                <Label>Max</Label>
+                <Input type="number" step="0.01" value={noiMax} onChange={(e) => setNoiMax(+e.target.value)} />
+                <Label>Step</Label>
+                <Input type="number" step="0.01" value={noiStep} onChange={(e) => setNoiStep(+e.target.value)} />
+                <Label>Cell Precision</Label>
+                <Select value={precision} onValueChange={setPrecision}>
+                  <SelectTrigger className="w-full"><SelectValue placeholder="0" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">0</SelectItem>
+                    <SelectItem value="1">1</SelectItem>
+                    <SelectItem value="2">2</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="shadow">
+            <CardHeader>
+              <CardTitle>Axes — Cap Rates</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-3 items-center">
+                <Label>Min</Label>
+                <Input type="number" step="0.0001" value={capMin} onChange={(e) => setCapMin(+e.target.value)} />
+                <Label>Max</Label>
+                <Input type="number" step="0.0001" value={capMax} onChange={(e) => setCapMax(+e.target.value)} />
+                <Label>Step (bps)</Label>
+                <Input type="number" step="0.0001" value={capStep} onChange={(e) => setCapStep(+e.target.value)} />
+                <div className="col-span-2 text-sm text-muted-foreground">Tip: 0.0025 = 25 bps</div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Chart */}
+        <Card className="shadow">
+          <CardHeader>
+            <CardTitle>Value vs Cap Rate (Base NOI)</CardTitle>
+          </CardHeader>
+          <CardContent className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                <XAxis dataKey="cap" tickFormatter={(t) => t + "%"} />
+                <YAxis tickFormatter={(t) => fmtCurrency(t)} width={80} />
+                <Tooltip formatter={(v) => fmtCurrency(v)} labelFormatter={(l) => `Cap ${l}%`} />
+                <Line type="monotone" dataKey="value" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+
+        {/* Sensitivity Grid */}
+        <Card className="shadow">
+          <CardHeader>
+            <CardTitle>Sensitivity Grid — NOI (rows) × Cap Rate (columns)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr>
+                    <th className="sticky left-0 bg-white z-10 p-2 text-left font-semibold">NOI x / Cap →</th>
+                    {capRates.map((c) => (
+                      <th key={c} className="p-2 text-right font-semibold">{(c * 100).toFixed(2)}%</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {noiMultipliers.map((m, i) => (
+                    <tr key={m}>
+                      <td className="sticky left-0 bg-white z-10 p-2 font-semibold">{pct(m)}</td>
+                      {grid[i].map((v, j) => (
+                        <td key={j} className="p-1 text-right" style={{ background: colorFor(v) }}>
+                          {Number(v.toFixed(parseInt(precision))).toLocaleString()}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="text-xs text-muted-foreground mt-3">Darker cells indicate higher value. Adjust inputs above to explore scenarios.
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Quick prompts */}
+        <div className="grid md:grid-cols-3 gap-4">
+          <Card className="shadow">
+            <CardHeader><CardTitle>Try This #1</CardTitle></CardHeader>
+            <CardContent>
+              Increase NOI by 6% (NOI x = 1.06). Does it offset a +50 bps cap expansion?
+            </CardContent>
+          </Card>
+          <Card className="shadow">
+            <CardHeader><CardTitle>Try This #2</CardTitle></CardHeader>
+            <CardContent>
+              Tighten cap to 7.5% and reduce NOI by 3%. How much does value change?
+            </CardContent>
+          </Card>
+          <Card className="shadow">
+            <CardHeader><CardTitle>Takeaway</CardTitle></CardHeader>
+            <CardContent>
+              Small moves in cap rates create large swings in value. Always stress-test NOI and cap together.
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+}
